@@ -5,8 +5,10 @@ Pushes a phone notification (via ntfy) when the JPY price at BCA drops to a targ
 ## Sources
 
 - `market` (default): live JPY/IDR mid-market rate from Wise, times BCA's markup (`MARKUP`, default 0.10%).
-  Tracks the myBCA / Pocket Valas rate within a few rupiah cents and moves ahead of BCA's website.
-  Measured on 21 Oct 2026: the myBCA app was 0.07-0.10% above Wise. Recheck it now and then and adjust.
+  Moves ahead of BCA's website, which lags the app.
+  Measured on 21 Oct 2026 (7 readings, 09:10-09:49 WIB): the myBCA app was 0.07-0.14% above Wise, mean 0.103%.
+  BCA moves its rate in steps behind the market, so expect the estimate within about +/-Rp0.04.
+  Recheck it now and then and set the `MARKUP` variable if it drifts.
 - `bca`: the public page https://www.bca.co.id/id/informasi/kurs.
   Exact e-Rate, but the page lags the app, sometimes by hours.
 

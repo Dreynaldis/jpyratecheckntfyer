@@ -14,8 +14,10 @@
 //               e.g. 113.5,113 -- each alerts once on its own  (required)
 //   NTFY_TOPIC  ntfy.sh topic name to publish to           (required)
 //   SOURCE      market (default) | bca
-//   MARKUP      BCA markup over market, default 0.001 (= 0.10%; myBCA app was
-//               +0.07% to +0.10% over Wise across readings on 21 Oct 2026)
+//   MARKUP      BCA markup over market, default 0.001 (= 0.10%). Seven myBCA app
+//               readings on 21 Oct 2026, 09:10-09:49 WIB, were +0.07% to +0.14%
+//               over Wise (mean 0.103%): BCA steps its rate a few minutes behind
+//               the market, so expect the estimate within about +/-Rp0.04.
 //   CURRENCY    default JPY
 //   RATE_TYPE   bca source only: eRate-sell (default) | TTCounter-sell | BankNotes-sell ...
 //   STATE_FILE  default ./state.json -- remembers whether we already alerted
