@@ -111,16 +111,19 @@ const prev = typeof state.alerted === "object" ? state.alerted : {};
 const alerted = {};
 console.log(`${CURRENCY} ${SOURCE}: ${detail.replace("\n", " | ")} | targets ${targets.join(", ")}`);
 
-// Alert once per crossing per target: re-arm only after the rate climbs back above it.
+// Alert when a target is crossed, then remind once per WIB day while the rate
+// stays at or below it. Climbing back above re-arms it.
+const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" });
 for (const target of targets) {
   const hit = rate <= target;
-  if (hit && !prev[target]) {
+  if (hit && prev[target] !== today) {
+    const reminder = Boolean(prev[target]);
     await notify(
-      `${CURRENCY} ~Rp${rate} hit Rp${target} -- check myBCA`,
+      `${CURRENCY} ~Rp${rate} ${reminder ? "still below" : "hit"} Rp${target} -- check myBCA`,
       `${detail}\nTarget Rp${target}. Confirm the real rate in the app before buying.`
     );
-    console.log(`Notification sent for ${target}`);
+    console.log(`Notification sent for ${target}${reminder ? " (daily reminder)" : ""}`);
   }
-  alerted[target] = hit;
+  alerted[target] = hit ? today : false;
 }
 await writeFile(STATE_FILE, JSON.stringify({ alerted, lastRate: rate, source: SOURCE }, null, 2));

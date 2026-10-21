@@ -24,5 +24,5 @@ The alert says "check myBCA": always confirm the real rate in the app before buy
    - optional variables `SOURCE`, `MARKUP`, `RATE_TYPE`
 4. Run the workflow once with "Run workflow" to confirm it can reach Yahoo and ntfy.
 
-You get one notification each time the rate crosses the target.
-The alert re-arms once the rate goes back above the target.
+You get a notification when the rate crosses a target, then one reminder per day (WIB) while it stays at or below it.
+Going back above the target re-arms it, so the next drop alerts immediately.
