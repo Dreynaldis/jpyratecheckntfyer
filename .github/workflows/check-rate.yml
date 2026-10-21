@@ -28,7 +28,7 @@ jobs:
         env:
           TARGET: ${{ vars.TARGET }}
           SOURCE: ${{ vars.SOURCE || 'market' }}
-          MARKUP: ${{ vars.MARKUP || '0.0053' }}
+          MARKUP: ${{ vars.MARKUP || '0.001' }}
           RATE_TYPE: ${{ vars.RATE_TYPE || 'eRate-sell' }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
 

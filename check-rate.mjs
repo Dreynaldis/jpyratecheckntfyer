@@ -2,8 +2,10 @@
 // to or below TARGET. Zero dependencies (Node 18+).
 //
 // Two sources:
-//   market (default) -- live JPY/IDR from Yahoo Finance, plus BCA's markup.
-//                       Updates every few minutes, ahead of BCA's website.
+//   market (default) -- live JPY/IDR mid-market rate from Wise, plus BCA's
+//                       markup. Updates about every minute, ahead of BCA's
+//                       website. (Yahoo's JPYIDR=X was tried first but went
+//                       stale for 30+ minutes at a time.)
 //   bca              -- BCA's public kurs page. Exact e-Rate, but the page
 //                       lags the myBCA app, sometimes by hours.
 //
@@ -12,7 +14,8 @@
 //               e.g. 113.5,113 -- each alerts once on its own  (required)
 //   NTFY_TOPIC  ntfy.sh topic name to publish to           (required)
 //   SOURCE      market (default) | bca
-//   MARKUP      BCA markup over market, default 0.0053 (= 0.53%, app 113.88 vs market 113.28)
+//   MARKUP      BCA markup over market, default 0.001 (= 0.10%; myBCA app was
+//               +0.07% to +0.10% over Wise across readings on 21 Oct 2026)
 //   CURRENCY    default JPY
 //   RATE_TYPE   bca source only: eRate-sell (default) | TTCounter-sell | BankNotes-sell ...
 //   STATE_FILE  default ./state.json -- remembers whether we already alerted
@@ -24,7 +27,7 @@ const {
   TARGET,
   NTFY_TOPIC,
   SOURCE = "market",
-  MARKUP = "0.0053",
+  MARKUP = "0.001",
   CURRENCY = "JPY",
   RATE_TYPE = "eRate-sell",
   STATE_FILE = "./state.json",
@@ -64,16 +67,20 @@ async function fetchBca() {
   return { rate, updated };
 }
 
-// Unofficial Yahoo endpoint: free and keyless, but can change without notice.
+// Wise's public rate endpoint (what wise.com's own charts use): keyless, but
+// undocumented, so it can change without notice.
 async function fetchMarket() {
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${CURRENCY}IDR=X?range=1d&interval=5m`;
+  const url = `https://wise.com/rates/live?source=${CURRENCY}&target=IDR`;
   const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
-  if (!res.ok) throw new Error(`Yahoo returned HTTP ${res.status}`);
-  const meta = (await res.json()).chart?.result?.[0]?.meta;
-  if (!meta?.regularMarketPrice) throw new Error("Yahoo response missing price");
+  if (!res.ok) throw new Error(`Wise returned HTTP ${res.status}`);
+  const { value, time } = await res.json();
+  if (!value || !time) throw new Error("Wise response missing value/time");
+  const ageMin = (Date.now() - time) / 60000;
   return {
-    market: meta.regularMarketPrice,
-    updated: new Date(meta.regularMarketTime * 1000).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }) + " WIB",
+    market: value,
+    updated:
+      new Date(time).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }) + " WIB" +
+      (ageMin > 30 ? ` (STALE: ${Math.round(ageMin)} min old)` : ""),
   };
 }
 
