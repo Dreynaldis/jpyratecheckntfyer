@@ -20,7 +20,7 @@ The alert says "check myBCA": always confirm the real rate in the app before buy
    Delete `state.json` afterwards to re-arm.
 3. Push to a GitHub repo, then under Settings > Secrets and variables > Actions add:
    - secret `NTFY_TOPIC`
-   - variable `TARGET` (e.g. `105`)
+   - variable `TARGET`: one level (`113.25`) or several, comma-separated (`113.5,113.25`)
    - optional variables `SOURCE`, `MARKUP`, `RATE_TYPE`
 4. Run the workflow once with "Run workflow" to confirm it can reach Yahoo and ntfy.
 

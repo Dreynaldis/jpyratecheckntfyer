@@ -8,7 +8,8 @@
 //                       lags the myBCA app, sometimes by hours.
 //
 // Env:
-//   TARGET      IDR per 1 JPY to alert at, e.g. 105        (required)
+//   TARGET      IDR per 1 JPY to alert at; comma-separated for several levels,
+//               e.g. 113.5,113 -- each alerts once on its own  (required)
 //   NTFY_TOPIC  ntfy.sh topic name to publish to           (required)
 //   SOURCE      market (default) | bca
 //   MARKUP      BCA markup over market, default 0.0053 (= 0.53%, app 113.88 vs market 113.28)
@@ -33,7 +34,11 @@ if (!TARGET || !NTFY_TOPIC) {
   console.error("TARGET and NTFY_TOPIC are required");
   process.exit(1);
 }
-const target = Number(TARGET);
+const targets = TARGET.split(",").map(Number).filter(Number.isFinite).sort((a, b) => b - a);
+if (!targets.length) {
+  console.error(`TARGET has no valid numbers: ${TARGET}`);
+  process.exit(1);
+}
 const markup = Number(MARKUP);
 
 // "24.231,55" -> 24231.55 (Indonesian number format)
@@ -101,15 +106,21 @@ if (SOURCE === "bca") {
 }
 
 const state = await loadState();
-const hit = rate <= target;
-console.log(`${CURRENCY} ${SOURCE}: ${detail.replace("\n", " | ")} | target ${target} hit=${hit}`);
+// Older state files stored a single boolean; start fresh in that case.
+const prev = typeof state.alerted === "object" ? state.alerted : {};
+const alerted = {};
+console.log(`${CURRENCY} ${SOURCE}: ${detail.replace("\n", " | ")} | targets ${targets.join(", ")}`);
 
-// Alert once per crossing: re-arm only after the rate climbs back above target.
-if (hit && !state.alerted) {
-  await notify(
-    `${CURRENCY} ~Rp${rate} -- check myBCA`,
-    `${detail}\nTarget Rp${target}. Confirm the real rate in the app before buying.`
-  );
-  console.log("Notification sent");
+// Alert once per crossing per target: re-arm only after the rate climbs back above it.
+for (const target of targets) {
+  const hit = rate <= target;
+  if (hit && !prev[target]) {
+    await notify(
+      `${CURRENCY} ~Rp${rate} hit Rp${target} -- check myBCA`,
+      `${detail}\nTarget Rp${target}. Confirm the real rate in the app before buying.`
+    );
+    console.log(`Notification sent for ${target}`);
+  }
+  alerted[target] = hit;
 }
-await writeFile(STATE_FILE, JSON.stringify({ alerted: hit, lastRate: rate, source: SOURCE }, null, 2));
+await writeFile(STATE_FILE, JSON.stringify({ alerted, lastRate: rate, source: SOURCE }, null, 2));
