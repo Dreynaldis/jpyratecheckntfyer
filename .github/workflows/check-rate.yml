@@ -2,9 +2,10 @@ name: check-jpy-rate
 
 on:
   schedule:
-    # Every 15 min, 07:00-21:45 WIB (UTC+7), Mon-Fri. GitHub may start runs a few
-    # minutes late. ~1300 runs/month: fits the free 2000 min on private repos.
-    - cron: "*/15 0-14 * * 1-5"
+    # Every 5 min, 07:00-21:55 WIB (UTC+7), Mon-Fri. GitHub may start runs late or
+    # skip some under load. Repo must be public: ~4000 runs/month exceeds the
+    # 2000 free minutes a private repo gets.
+    - cron: "*/5 0-14 * * 1-5"
   workflow_dispatch:
 
 jobs:
