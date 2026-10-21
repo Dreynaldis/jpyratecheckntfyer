@@ -1,0 +1,38 @@
+name: check-jpy-rate
+
+on:
+  schedule:
+    # Every 15 min, 07:00-21:45 WIB (UTC+7), Mon-Fri. GitHub may start runs a few
+    # minutes late. ~1300 runs/month: fits the free 2000 min on private repos.
+    - cron: "*/15 0-14 * * 1-5"
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # state.json remembers "already alerted" so you get one push per crossing
+      - uses: actions/cache/restore@v4
+        with:
+          path: state.json
+          key: rate-state-${{ github.run_id }}
+          restore-keys: rate-state-
+
+      - run: node check-rate.mjs
+        env:
+          TARGET: ${{ vars.TARGET }}
+          SOURCE: ${{ vars.SOURCE || 'market' }}
+          MARKUP: ${{ vars.MARKUP || '0.0053' }}
+          RATE_TYPE: ${{ vars.RATE_TYPE || 'eRate-sell' }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: state.json
+          key: rate-state-${{ github.run_id }}
