@@ -9,6 +9,9 @@ Pushes a phone notification (via ntfy) when the JPY price at BCA drops to a targ
   Measured on 21 Oct 2026 (7 readings, 09:10-09:49 WIB): the myBCA app was 0.07-0.14% above Wise, mean 0.103%.
   BCA moves its rate in steps behind the market, so expect the estimate within about +/-Rp0.04.
   Recheck it now and then and set the `MARKUP` variable if it drifts.
+  Outside BCA business hours (evenings, nights, early mornings) BCA widens its spread: on 5 Nov 2026 at 07:44 WIB its e-Rate sell was 1.1% over Wise, not 0.1%.
+  So this source also reads BCA's website and only alerts when its e-Rate sell is at or below the target plus `BCA_TOLERANCE` (default 0.3, covering the website lagging the app during the day).
+  If the BCA page can't be fetched, the alert still goes out, marked "UNCHECKED".
 - `bca`: the public page https://www.bca.co.id/id/informasi/kurs.
   Exact e-Rate, but the page lags the app, sometimes by hours.
 
@@ -23,7 +26,7 @@ The alert says "check myBCA": always confirm the real rate in the app before buy
 3. Push to a GitHub repo, then under Settings > Secrets and variables > Actions add:
    - secret `NTFY_TOPIC`
    - variable `TARGET`: one level (`113.25`) or several, comma-separated (`113.5,113.25`)
-   - optional variables `SOURCE`, `MARKUP`, `RATE_TYPE`
+   - optional variables `SOURCE`, `MARKUP`, `BCA_TOLERANCE`, `RATE_TYPE`
 4. Run the workflow once with "Run workflow" to confirm it can reach Wise and ntfy.
 
 You get a notification when the rate crosses a target, then one reminder per day (WIB) while it stays at or below it.

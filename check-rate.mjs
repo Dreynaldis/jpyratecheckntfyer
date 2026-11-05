@@ -18,6 +18,13 @@
 //               readings on 21 Oct 2026, 09:10-09:49 WIB, were +0.07% to +0.14%
 //               over Wise (mean 0.103%): BCA steps its rate a few minutes behind
 //               the market, so expect the estimate within about +/-Rp0.04.
+//   BCA_TOLERANCE  market source only, default 0.3. The alert also needs BCA's
+//               website eRate-sell <= target + this. Outside business hours BCA
+//               widens its spread (5 Nov 2026 07:44 WIB: +1.1% over Wise, vs
+//               +0.1% in the day), which the website shows but the market
+//               estimate can't. The slack covers the website lagging the app
+//               by ~Rp0.20 in the day. If BCA can't be fetched, the alert still
+//               goes out, marked as unchecked.
 //   CURRENCY    default JPY
 //   RATE_TYPE   bca source only: eRate-sell (default) | TTCounter-sell | BankNotes-sell ...
 //   STATE_FILE  default ./state.json -- remembers whether we already alerted
@@ -30,6 +37,7 @@ const {
   NTFY_TOPIC,
   SOURCE = "market",
   MARKUP = "0.001",
+  BCA_TOLERANCE = "0.3",
   CURRENCY = "JPY",
   RATE_TYPE = "eRate-sell",
   STATE_FILE = "./state.json",
@@ -45,6 +53,7 @@ if (!targets.length) {
   process.exit(1);
 }
 const markup = Number(MARKUP);
+const bcaTolerance = Number(BCA_TOLERANCE);
 
 // "24.231,55" -> 24231.55 (Indonesian number format)
 const parseIdNumber = (s) => Number(s.replace(/\./g, "").replace(",", "."));
@@ -104,6 +113,8 @@ async function notify(title, message) {
 }
 
 let rate, detail;
+// Market source only: BCA's own website price, the gate against off-hours spreads.
+let bcaWeb = null;
 if (SOURCE === "bca") {
   const bca = await fetchBca();
   rate = bca.rate;
@@ -112,7 +123,15 @@ if (SOURCE === "bca") {
   const { market, updated } = await fetchMarket();
   rate = Math.round(market * (1 + markup) * 100) / 100;
   detail = `Market Rp${market} at ${updated}\nEst. BCA rate Rp${rate} (+${(markup * 100).toFixed(2)}%)`;
+  try {
+    bcaWeb = await fetchBca();
+    detail += `\nBCA website ${RATE_TYPE}: Rp${bcaWeb.rate} (updated ${bcaWeb.updated ?? "?"})`;
+  } catch (err) {
+    console.error(`BCA check failed, alerting on the estimate alone: ${err.message}`);
+    detail += "\nBCA website: UNCHECKED (fetch failed)";
+  }
 }
+const bcaAllows = (target) => !bcaWeb || bcaWeb.rate <= target + bcaTolerance;
 
 const state = await loadState();
 // Older state files stored a single boolean; start fresh in that case.
@@ -124,7 +143,7 @@ console.log(`${CURRENCY} ${SOURCE}: ${detail.replace("\n", " | ")} | targets ${t
 // stays at or below it. Climbing back above re-arms it.
 const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" });
 for (const target of targets) {
-  const hit = rate <= target;
+  const hit = rate <= target && bcaAllows(target);
   if (hit && prev[target] !== today) {
     const reminder = Boolean(prev[target]);
     await notify(
