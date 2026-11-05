@@ -8,9 +8,16 @@ on:
     - cron: "*/5 0-14 * * 1-5"
   workflow_dispatch:
 
+# One run at a time: overlapping runs would read the same old state.json and
+# send the same alert twice.
+concurrency:
+  group: check-rate
+  cancel-in-progress: false
+
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 3
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

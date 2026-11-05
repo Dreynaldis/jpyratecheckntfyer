@@ -70,7 +70,7 @@ const bcaTolerance = Number(BCA_TOLERANCE);
 const parseIdNumber = (s) => Number(s.replace(/\./g, "").replace(",", "."));
 
 async function fetchBca() {
-  const res = await fetch(BCA_URL, { headers: { "User-Agent": "Mozilla/5.0" } });
+  const res = await fetch(BCA_URL, { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(15000) });
   if (!res.ok) throw new Error(`BCA returned HTTP ${res.status}`);
   const html = await res.text();
 
@@ -93,7 +93,7 @@ async function fetchBca() {
 // undocumented, so it can change without notice.
 async function fetchMarket() {
   const url = `https://wise.com/rates/live?source=${CURRENCY}&target=IDR`;
-  const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+  const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(15000) });
   if (!res.ok) throw new Error(`Wise returned HTTP ${res.status}`);
   const { value, time } = await res.json();
   if (!value || !time) throw new Error("Wise response missing value/time");
@@ -119,6 +119,7 @@ async function notify(title, message) {
     method: "POST",
     headers: { Title: title, Priority: "high", Tags: "yen,chart_with_downwards_trend" },
     body: message,
+    signal: AbortSignal.timeout(15000),
   });
   if (!res.ok) throw new Error(`ntfy returned HTTP ${res.status}`);
 }
@@ -162,7 +163,8 @@ if (marginAlert !== null) {
   }
 }
 
-// One entry per alert; key is what state.json remembers it by.
+// One entry per alert; key is what state.json remembers it by. rearm (default
+// !hit) says when a sent alert may fire again.
 const pct = (x) => `${(x * 100).toFixed(2)}%`;
 const checks = targets.map((target) => ({
   key: String(target),
@@ -174,6 +176,9 @@ if (margin !== null) {
   checks.push({
     key: `margin:${marginAlert}`,
     hit: margin <= marginAlert,
+    // BCA's markup jumps around by tenths of a percent within minutes; without
+    // this gap a margin hovering at the threshold would alert on every flap.
+    rearm: margin > marginAlert + 0.001,
     title: (reminder) =>
       `BCA ${CURRENCY} margin ${pct(margin)} ${reminder ? "still" : "now"} <= ${pct(marginAlert)} -- cheap moment, check myBCA`,
     why: `BCA is only ${pct(margin)} above market (alert at ${pct(marginAlert)}).`,
@@ -187,15 +192,25 @@ const alerted = {};
 console.log(`${CURRENCY} ${SOURCE}: ${detail.replaceAll("\n", " | ")} | checks ${checks.map((c) => c.key).join(", ")}`);
 
 // Alert when a check first hits, then remind once per WIB day while it stays
-// hit. Going back to not-hit re-arms it.
+// hit. Re-arms once rearm is true. A failed push keeps the old memory, so the
+// next run retries it instead of the whole run dying before state is saved.
 const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" });
-for (const { key, hit, title, why } of checks) {
+let failedSends = 0;
+for (const { key, hit, rearm = !hit, title, why } of checks) {
   if (hit && prev[key] !== today) {
     const reminder = Boolean(prev[key]);
-    await notify(title(reminder), `${detail}\n${why} Confirm the real rate in the app before buying.`);
-    console.log(`Notification sent for ${key}${reminder ? " (daily reminder)" : ""}`);
+    try {
+      await notify(title(reminder), `${detail}\n${why} Confirm the real rate in the app before buying.`);
+      console.log(`Notification sent for ${key}${reminder ? " (daily reminder)" : ""}`);
+      alerted[key] = today;
+    } catch (err) {
+      console.error(`Notification for ${key} failed, retrying next run: ${err.message}`);
+      alerted[key] = prev[key] ?? false;
+      failedSends++;
+    }
+    continue;
   }
-  alerted[key] = hit ? today : false;
+  alerted[key] = hit ? prev[key] : rearm ? false : (prev[key] ?? false);
 }
 // A skipped margin check keeps its memory, so a Wise blip can't re-send today's alert.
 if (marginAlert !== null && margin === null) {
@@ -203,3 +218,5 @@ if (marginAlert !== null && margin === null) {
   alerted[key] = prev[key] ?? false;
 }
 await writeFile(STATE_FILE, JSON.stringify({ alerted, lastRate: rate, margin, source: SOURCE }, null, 2));
+// Still fail the run (after saving) so GitHub shows a red run for a lost alert.
+if (failedSends) process.exit(1);
