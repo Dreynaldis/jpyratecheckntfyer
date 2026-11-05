@@ -27,6 +27,7 @@ jobs:
       - run: node check-rate.mjs
         env:
           TARGET: ${{ vars.TARGET }}
+          MARGIN_ALERT: ${{ vars.MARGIN_ALERT }}
           SOURCE: ${{ vars.SOURCE || 'market' }}
           MARKUP: ${{ vars.MARKUP || '0.001' }}
           RATE_TYPE: ${{ vars.RATE_TYPE || 'eRate-sell' }}

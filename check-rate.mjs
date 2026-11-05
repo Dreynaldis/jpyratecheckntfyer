@@ -6,12 +6,20 @@
 //                       markup. Updates about every minute, ahead of BCA's
 //                       website. (Yahoo's JPYIDR=X was tried first but went
 //                       stale for 30+ minutes at a time.)
-//   bca              -- BCA's public kurs page. Exact e-Rate, but the page
-//                       lags the myBCA app, sometimes by hours.
+//   bca              -- BCA's public kurs page: the price itself. Since Nov 2026
+//                       BCA's JPY markup over market sits around 1% most of
+//                       the day, so a fixed MARKUP no longer models it, and
+//                       the website has matched the myBCA app when checked.
 //
 // Env:
 //   TARGET      IDR per 1 JPY to alert at; comma-separated for several levels,
-//               e.g. 113.5,113 -- each alerts once on its own  (required)
+//               e.g. 113.5,113 -- each alerts once on its own
+//   MARGIN_ALERT  alert when BCA's e-Rate sell is at most this fraction above
+//               the Wise market rate, e.g. 0.003 (= 0.3%). A cheap moment to
+//               buy regardless of the price level: BCA was +0.1% on 21 Oct
+//               2026 but +1.0% on 5 Nov. Needs both BCA and Wise; skipped (not
+//               failed) when either can't be fetched.
+//               At least one of TARGET / MARGIN_ALERT is required.
 //   NTFY_TOPIC  ntfy.sh topic name to publish to           (required)
 //   SOURCE      market (default) | bca
 //   MARKUP      BCA markup over market, default 0.001 (= 0.10%). Seven myBCA app
@@ -33,7 +41,8 @@ import { readFile, writeFile } from "node:fs/promises";
 
 const BCA_URL = "https://www.bca.co.id/id/informasi/kurs";
 const {
-  TARGET,
+  TARGET = "",
+  MARGIN_ALERT = "",
   NTFY_TOPIC,
   SOURCE = "market",
   MARKUP = "0.001",
@@ -43,13 +52,15 @@ const {
   STATE_FILE = "./state.json",
 } = process.env;
 
-if (!TARGET || !NTFY_TOPIC) {
-  console.error("TARGET and NTFY_TOPIC are required");
+if (!NTFY_TOPIC) {
+  console.error("NTFY_TOPIC is required");
   process.exit(1);
 }
-const targets = TARGET.split(",").map(Number).filter(Number.isFinite).sort((a, b) => b - a);
-if (!targets.length) {
-  console.error(`TARGET has no valid numbers: ${TARGET}`);
+// Number("") is 0, so drop empty entries before parsing.
+const targets = TARGET.split(",").filter((s) => s.trim()).map(Number).filter(Number.isFinite).sort((a, b) => b - a);
+const marginAlert = MARGIN_ALERT.trim() ? Number(MARGIN_ALERT) : null;
+if (!targets.length && !Number.isFinite(marginAlert)) {
+  console.error(`Need a valid TARGET and/or MARGIN_ALERT (got TARGET="${TARGET}", MARGIN_ALERT="${MARGIN_ALERT}")`);
   process.exit(1);
 }
 const markup = Number(MARKUP);
@@ -113,16 +124,18 @@ async function notify(title, message) {
 }
 
 let rate, detail;
-// Market source only: BCA's own website price, the gate against off-hours spreads.
+// bcaWeb: BCA's own website price. With SOURCE=market it is the gate against
+// off-hours spreads; either source may need both for MARGIN_ALERT.
 let bcaWeb = null;
+let mkt = null;
 if (SOURCE === "bca") {
-  const bca = await fetchBca();
-  rate = bca.rate;
-  detail = `BCA ${RATE_TYPE}: Rp${rate} (updated ${bca.updated ?? "?"})`;
+  bcaWeb = await fetchBca();
+  rate = bcaWeb.rate;
+  detail = `BCA ${RATE_TYPE}: Rp${rate} (updated ${bcaWeb.updated ?? "?"})`;
 } else {
-  const { market, updated } = await fetchMarket();
-  rate = Math.round(market * (1 + markup) * 100) / 100;
-  detail = `Market Rp${market} at ${updated}\nEst. BCA rate Rp${rate} (+${(markup * 100).toFixed(2)}%)`;
+  mkt = await fetchMarket();
+  rate = Math.round(mkt.market * (1 + markup) * 100) / 100;
+  detail = `Market Rp${mkt.market} at ${mkt.updated}\nEst. BCA rate Rp${rate} (+${(markup * 100).toFixed(2)}%)`;
   try {
     bcaWeb = await fetchBca();
     detail += `\nBCA website ${RATE_TYPE}: Rp${bcaWeb.rate} (updated ${bcaWeb.updated ?? "?"})`;
@@ -133,25 +146,60 @@ if (SOURCE === "bca") {
 }
 const bcaAllows = (target) => !bcaWeb || bcaWeb.rate <= target + bcaTolerance;
 
+// BCA's markup over market, e.g. 0.0103 = BCA charges 1.03% above Wise.
+let margin = null;
+if (marginAlert !== null) {
+  try {
+    if (!bcaWeb) throw new Error("BCA website unavailable");
+    if (!mkt) {
+      mkt = await fetchMarket();
+      detail += `\nMarket Rp${mkt.market} at ${mkt.updated}`;
+    }
+    margin = bcaWeb.rate / mkt.market - 1;
+    detail += `\nBCA margin over market: ${(margin * 100).toFixed(2)}%`;
+  } catch (err) {
+    console.error(`Margin check skipped: ${err.message}`);
+  }
+}
+
+// One entry per alert; key is what state.json remembers it by.
+const pct = (x) => `${(x * 100).toFixed(2)}%`;
+const checks = targets.map((target) => ({
+  key: String(target),
+  hit: rate <= target && bcaAllows(target),
+  title: (reminder) => `${CURRENCY} ~Rp${rate} ${reminder ? "still below" : "hit"} Rp${target} -- check myBCA`,
+  why: `Target Rp${target}.`,
+}));
+if (margin !== null) {
+  checks.push({
+    key: `margin:${marginAlert}`,
+    hit: margin <= marginAlert,
+    title: (reminder) =>
+      `BCA ${CURRENCY} margin ${pct(margin)} ${reminder ? "still" : "now"} <= ${pct(marginAlert)} -- cheap moment, check myBCA`,
+    why: `BCA is only ${pct(margin)} above market (alert at ${pct(marginAlert)}).`,
+  });
+}
+
 const state = await loadState();
 // Older state files stored a single boolean; start fresh in that case.
 const prev = typeof state.alerted === "object" ? state.alerted : {};
 const alerted = {};
-console.log(`${CURRENCY} ${SOURCE}: ${detail.replace("\n", " | ")} | targets ${targets.join(", ")}`);
+console.log(`${CURRENCY} ${SOURCE}: ${detail.replaceAll("\n", " | ")} | checks ${checks.map((c) => c.key).join(", ")}`);
 
-// Alert when a target is crossed, then remind once per WIB day while the rate
-// stays at or below it. Climbing back above re-arms it.
+// Alert when a check first hits, then remind once per WIB day while it stays
+// hit. Going back to not-hit re-arms it.
 const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" });
-for (const target of targets) {
-  const hit = rate <= target && bcaAllows(target);
-  if (hit && prev[target] !== today) {
-    const reminder = Boolean(prev[target]);
-    await notify(
-      `${CURRENCY} ~Rp${rate} ${reminder ? "still below" : "hit"} Rp${target} -- check myBCA`,
-      `${detail}\nTarget Rp${target}. Confirm the real rate in the app before buying.`
-    );
-    console.log(`Notification sent for ${target}${reminder ? " (daily reminder)" : ""}`);
+for (const { key, hit, title, why } of checks) {
+  if (hit && prev[key] !== today) {
+    const reminder = Boolean(prev[key]);
+    await notify(title(reminder), `${detail}\n${why} Confirm the real rate in the app before buying.`);
+    console.log(`Notification sent for ${key}${reminder ? " (daily reminder)" : ""}`);
   }
-  alerted[target] = hit ? today : false;
+  alerted[key] = hit ? today : false;
 }
-await writeFile(STATE_FILE, JSON.stringify({ alerted, lastRate: rate, source: SOURCE }, null, 2));
+// A skipped margin check keeps its memory, so a Wise blip can't re-send today's alert.
+if (marginAlert !== null && margin === null) {
+  const key = `margin:${marginAlert}`;
+  alerted[key] = prev[key] ?? false;
+}
+await writeFile(STATE_FILE, JSON.stringify({ alerted, lastRate: rate, margin, source: SOURCE }, null, 2));

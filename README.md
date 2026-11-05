@@ -12,8 +12,15 @@ Pushes a phone notification (via ntfy) when the JPY price at BCA drops to a targ
   Outside BCA business hours (evenings, nights, early mornings) BCA widens its spread: on 5 Nov 2026 at 07:44 WIB its e-Rate sell was 1.1% over Wise, not 0.1%.
   So this source also reads BCA's website and only alerts when its e-Rate sell is at or below the target plus `BCA_TOLERANCE` (default 0.3, covering the website lagging the app during the day).
   If the BCA page can't be fetched, the alert still goes out, marked "UNCHECKED".
-- `bca`: the public page https://www.bca.co.id/id/informasi/kurs.
-  Exact e-Rate, but the page lags the app, sometimes by hours.
+- `bca`: the public page https://www.bca.co.id/id/informasi/kurs, the price itself.
+  The website has matched the myBCA app when checked, and BCA's markup changes through the day, so this is the recommended source.
+  On 5 Nov 2026 it was 115.84 (+1.0% over market) at 08:00 WIB and 114.96 (+0.3%) at 08:06 WIB.
+
+## Margin alert
+
+`MARGIN_ALERT` (e.g. `0.003` = 0.3%) alerts when BCA's e-Rate sell is at most that far above the Wise market rate.
+It flags a cheap moment to buy whatever the price level, and works with either source, alongside `TARGET` or on its own.
+If Wise or BCA can't be fetched, the margin check is skipped for that run instead of failing it.
 
 The alert says "check myBCA": always confirm the real rate in the app before buying.
 
@@ -26,6 +33,7 @@ The alert says "check myBCA": always confirm the real rate in the app before buy
 3. Push to a GitHub repo, then under Settings > Secrets and variables > Actions add:
    - secret `NTFY_TOPIC`
    - variable `TARGET`: one level (`113.25`) or several, comma-separated (`113.5,113.25`)
+   - and/or variable `MARGIN_ALERT` (at least one of the two)
    - optional variables `SOURCE`, `MARKUP`, `BCA_TOLERANCE`, `RATE_TYPE`
 4. Run the workflow once with "Run workflow" to confirm it can reach Wise and ntfy.
 
